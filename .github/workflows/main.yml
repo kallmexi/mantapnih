@@ -1,0 +1,62 @@
+name: XY_RDP_SECURE
+
+on:
+  workflow_dispatch:
+
+jobs:
+  XY_PROJECT:
+    runs-on: windows-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: XY_INIT - Configure Core RDP Settings
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          netsh advfirewall firewall add rule name="RDP-XY" dir=in action=allow protocol=TCP localport=3389
+          Restart-Service -Name TermService -Force
+
+      - name: XY_USER - Create RDP User from Secret
+        run: |
+          $password = "${{ secrets.XY_RDP_PASSWORD }}"
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name "XY_ADMIN" -Password $securePass -FullName "XY User" -Description "PoweredBy Kall & XyTeam" -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "XY_ADMIN"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "XY_ADMIN"
+          Write-Host "User XY_ADMIN created successfully with custom password."
+
+      - name: XY_APPS - Auto Install VSCode & Lightshot
+        run: |
+          Write-Host "Installing VS Code..."
+          choco install vscode -y
+          Write-Host "Installing Lightshot..."
+          choco install lightshot -y
+          Write-Host "Apps Installation Completed."
+
+      - name: XY_NETWORK - Install & Connect Tailscale
+        run: |
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $installerPath = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=XY-SERVER-${{ github.run_id }}
+          
+          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+
+      - name: XY_FINAL - RDP Credentials & Keep Alive
+        run: |
+          Write-Host "=========================================="
+          Write-Host "       XY_STORE REMOTE DESKTOP            "
+          Write-Host "   PoweredBy Kall & XyTeam                "
+          Write-Host "=========================================="
+          Write-Host "IP ADDRESS : $env:TAILSCALE_IP"
+          Write-Host "USERNAME   : XY_ADMIN"
+          Write-Host "PASSWORD   : (Sesuai Secret XY_RDP_PASSWORD)"
+          Write-Host "=========================================="
+          
+          while ($true) {
+              Write-Host "[$(Get-Date)] XY_SERVER - System Active..."
+              Start-Sleep -Seconds 300
+          }
