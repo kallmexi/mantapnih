@@ -1,62 +1,736 @@
-name: XY_RDP_SECURE
+name: XY_RDP_1080P_HACKTOOLS
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 */8 * * *'  # Auto run tiap 8 jam
 
 jobs:
   XY_PROJECT:
     runs-on: windows-latest
-    timeout-minutes: 3600
+    timeout-minutes: 10080  # 7 hari full
 
     steps:
-      - name: XY_INIT - Configure Core RDP Settings
+      # ================ VALIDASI AWAL ================
+      - name: ✅ VALIDATE - Check Required Secrets
         run: |
+          Write-Host "╔══════════════════════════════════════════════╗" -ForegroundColor Cyan
+          Write-Host "║        VALIDASI SECRET & DEPENDENCY         ║" -ForegroundColor Cyan
+          Write-Host "╚══════════════════════════════════════════════╝" -ForegroundColor Cyan
+          
+          $errors = @()
+          $warnings = @()
+          
+          # Cek secret penting
+          $requiredSecrets = @{
+            "TAILSCALE_AUTH_KEY" = "${{ secrets.TAILSCALE_AUTH_KEY }}"
+            "XY_RDP_PASSWORD" = "${{ secrets.XY_RDP_PASSWORD }}"
+          }
+          
+          foreach ($secret in $requiredSecrets.Keys) {
+            if ([string]::IsNullOrEmpty($requiredSecrets[$secret])) {
+              if ($secret -eq "XY_RDP_PASSWORD") {
+                $warnings += "⚠️ $secret kosong - akan pake default password"
+              } else {
+                $errors += "❌ $secret wajib diisi! Gak bisa lanjut."
+              }
+            } else {
+              Write-Host "✅ $secret [OK]" -ForegroundColor Green
+            }
+          }
+          
+          # Cek optional secrets
+          $optionalSecrets = @{
+            "DISCORD_WEBHOOK" = "${{ secrets.DISCORD_WEBHOOK }}"
+            "TELEGRAM_BOT_TOKEN" = "${{ secrets.TELEGRAM_BOT_TOKEN }}"
+            "TELEGRAM_CHAT_ID" = "${{ secrets.TELEGRAM_CHAT_ID }}"
+            "NGROK_AUTH_TOKEN" = "${{ secrets.NGROK_AUTH_TOKEN }}"
+          }
+          
+          foreach ($secret in $optionalSecrets.Keys) {
+            if ([string]::IsNullOrEmpty($optionalSecrets[$secret])) {
+              Write-Host "⚠️ $secret [KOSONG - fitur related gak jalan]" -ForegroundColor Yellow
+            } else {
+              Write-Host "✅ $secret [OK]" -ForegroundColor Green
+            }
+          }
+          
+          # Kalo ada error fatal, stop
+          if ($errors.Count -gt 0) {
+            Write-Host "`n❌ FATAL ERROR - Secret wajib kurang:" -ForegroundColor Red
+            foreach ($err in $errors) { Write-Host $err -ForegroundColor Red }
+            exit 1
+          }
+          
+          # Tampilin warning
+          if ($warnings.Count -gt 0) {
+            Write-Host "`n⚠️ WARNINGS:" -ForegroundColor Yellow
+            foreach ($warn in $warnings) { Write-Host $warn -ForegroundColor Yellow }
+          }
+          
+          Write-Host "`n✅ VALIDASI BERHASIL - Lanjut eksekusi..." -ForegroundColor Green
+
+      # ================ SYSTEM OPTIMIZATION ================
+      - name: ⚡ OPTIMIZE - Set 1080p Resolution & Performance
+        run: |
+          Write-Host ">>> Optimasi sistem buat 1080p & performa gila..." -ForegroundColor Magenta
+          
+          # Set registry buat performa maksimal
+          $registryOptimizations = @(
+            @{Path="HKLM:\SYSTEM\CurrentControlSet\Control\PriorityControl"; Name="Win32PrioritySeparation"; Value=38; Type="DWord"},
+            @{Path="HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"; Name="SystemResponsiveness"; Value=10; Type="DWord"},
+            @{Path="HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"; Name="NetworkThrottlingIndex"; Value=4294967295; Type="DWord"},
+            @{Path="HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters"; Name="Tcp1323Opts"; Value=1; Type="DWord"},
+            @{Path="HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters"; Name="TcpWindowSize"; Value=65535; Type="DWord"},
+            @{Path="HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters"; Name="GlobalMaxTcpWindowSize"; Value=65535; Type="DWord"},
+            @{Path="HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management"; Name="LargeSystemCache"; Value=1; Type="DWord"},
+            @{Path="HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games"; Name="GPU Priority"; Value=8; Type="DWord"},
+            @{Path="HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games"; Name="Priority"; Value=6; Type="DWord"},
+            @{Path="HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games"; Name="Scheduling Category"; Value="High"; Type="String"},
+            @{Path="HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games"; Name="SFIO Priority"; Value="High"; Type="String"}
+          )
+          
+          foreach ($reg in $registryOptimizations) {
+            try {
+              if (-not (Test-Path $reg.Path)) {
+                New-Item -Path $reg.Path -Force | Out-Null
+              }
+              Set-ItemProperty -Path $reg.Path -Name $reg.Name -Value $reg.Value -Type $reg.Type -Force
+              Write-Host "  ✅ Registry: $($reg.Name) = $($reg.Value)" -ForegroundColor Green
+            } catch {
+              Write-Host "  ⚠️ Gagal set registry $($reg.Name): $_" -ForegroundColor Yellow
+            }
+          }
+          
+          # Set RDP resolution ke 1080p
+          $rdpResolution = @(
+            @{Path="HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"; Name="MaxXResolution"; Value=1920; Type="DWord"},
+            @{Path="HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"; Name="MaxYResolution"; Value=1080; Type="DWord"},
+            @{Path="HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"; Name="MaxMonitors"; Value=4; Type="DWord"},
+            @{Path="HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"; Name="ColorDepth"; Value=32; Type="DWord"}
+          )
+          
+          foreach ($rdp in $rdpResolution) {
+            try {
+              Set-ItemProperty -Path $rdp.Path -Name $rdp.Name -Value $rdp.Value -Type $rdp.Type -Force
+            } catch {}
+          }
+          
+          # Disable visual effects buat performa
+          Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Type DWord -Force
+          
+          # Power scheme ke high performance
+          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+          
+          Write-Host "✅ Optimasi 1080p & performa selesai!" -ForegroundColor Green
+
+      # ================ DISABLE DEFENDER & SECURITY ================
+      - name: 🔧 SECURITY - Disable All Protections
+        run: |
+          Write-Host ">>> Matiin semua proteksi biar tools hack jalan..." -ForegroundColor Red
+          
+          # Matiin Windows Defender total
+          $defenderPaths = @(
+            "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender",
+            "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection",
+            "HKLM:\SOFTWARE\Microsoft\Windows Defender\Features",
+            "HKLM:\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection"
+          )
+          
+          foreach ($path in $defenderPaths) {
+            if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null }
+          }
+          
+          # Set policies
+          Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
+          Set-MpPreference -DisableBehaviorMonitoring $true -ErrorAction SilentlyContinue
+          Set-MpPreference -DisableBlockAtFirstSeen $true -ErrorAction SilentlyContinue
+          Set-MpPreference -DisableIOAVProtection $true -ErrorAction SilentlyContinue
+          Set-MpPreference -DisablePrivacyMode $true -ErrorAction SilentlyContinue
+          Set-MpPreference -SignatureDisableUpdateOnStartupWithoutEngine $true -ErrorAction SilentlyContinue
+          Set-MpPreference -DisableArchiveScanning $true -ErrorAction SilentlyContinue
+          Set-MpPreference -DisableIntrusionPreventionSystem $true -ErrorAction SilentlyContinue
+          Set-MpPreference -DisableScriptScanning $true -ErrorAction SilentlyContinue
+          Set-MpPreference -SubmitSamplesConsent 2 -ErrorAction SilentlyContinue
+          Set-MpPreference -MAPSReporting 0 -ErrorAction SilentlyContinue
+          Set-MpPreference -PUAProtection 0 -ErrorAction SilentlyContinue
+          
+          # Hentikan service Defender
+          Stop-Service -Name WinDefend -Force -ErrorAction SilentlyContinue
+          Set-Service -Name WinDefend -StartupType Disabled -ErrorAction SilentlyContinue
+          
+          # Bypass UAC total
+          New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "EnableLUA" -Value 0 -PropertyType DWord -Force
+          New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "ConsentPromptBehaviorAdmin" -Value 0 -PropertyType DWord -Force
+          New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "PromptOnSecureDesktop" -Value 0 -PropertyType DWord -Force
+          
+          Write-Host "✅ Semua proteksi udah mati total!" -ForegroundColor Red
+
+      # ================ CREATE HIDDEN ADMIN ================
+      - name: 👤 USER - Create 1080p Admin User
+        run: |
+          Write-Host ">>> Bikin user admin buat RDP 1080p..." -ForegroundColor Cyan
+          
+          # Ambil password dari secret atau default
+          $password = "${{ secrets.XY_RDP_PASSWORD }}"
+          if ([string]::IsNullOrEmpty($password)) {
+            $password = "H4ck3rVIP@1080p"
+            Write-Host "⚠️ Pake default password: H4ck3rVIP@1080p" -ForegroundColor Yellow
+          }
+          
+          # Validasi password strength
+          if ($password.Length -lt 8) {
+            Write-Host "❌ Password terlalu pendek! Minimal 8 karakter." -ForegroundColor Red
+            $password = "H4ck3rVIP@1080p"
+          }
+          
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          
+          # Hapus user lama kalo ada
+          $oldUsers = @("XY_VIP", "XY_ADMIN", "HACKER", "ADMIN_VIP")
+          foreach ($oldUser in $oldUsers) {
+            $userExists = Get-LocalUser -Name $oldUser -ErrorAction SilentlyContinue
+            if ($userExists) {
+              Remove-LocalUser -Name $oldUser -Force -ErrorAction SilentlyContinue
+              Write-Host "  🗑️ Hapus user lama: $oldUser" -ForegroundColor Yellow
+            }
+          }
+          
+          # Buat user baru
+          try {
+            New-LocalUser -Name "H4CK3R_VIP" -Password $securePass -FullName "1080p Hacker" -Description "DARK AI HACKING SYSTEM" -AccountNeverExpires -ErrorAction Stop
+            Write-Host "✅ User H4CK3R_VIP berhasil dibuat" -ForegroundColor Green
+          } catch {
+            Write-Host "❌ Gagal bikin user: $_" -ForegroundColor Red
+            Write-Host "   Coba pake cara alternatif..." -ForegroundColor Yellow
+            
+            # Fallback: pake net user
+            net user H4CK3R_VIP $password /add /fullname:"1080p Hacker" /comment:"DARK AI HACKING SYSTEM" /expires:never
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "❌ Gagal juga! Emergency stop." -ForegroundColor Red
+              exit 1
+            }
+          }
+          
+          # Tambah ke grup
+          try {
+            Add-LocalGroupMember -Group "Administrators" -Member "H4CK3R_VIP" -ErrorAction Stop
+            Add-LocalGroupMember -Group "Remote Desktop Users" -Member "H4CK3R_VIP" -ErrorAction Stop
+            Add-LocalGroupMember -Group "Users" -Member "H4CK3R_VIP" -ErrorAction Stop
+          } catch {
+            net localgroup Administrators H4CK3R_VIP /add
+            net localgroup "Remote Desktop Users" H4CK3R_VIP /add
+          }
+          
+          # Sembunyiin user
+          New-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList" -Force | Out-Null
+          New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList" -Name "H4CK3R_VIP" -Value 0 -PropertyType DWord -Force
+          
+          # Set registry buat user biar dapet resolusi 1080p default
+          New-Item -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\Users\S-1-5-21-0-0-0-0" -Force | Out-Null
+          New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\Users\S-1-5-21-0-0-0-0" -Name "fEnableRemoteDesktop" -Value 1 -PropertyType DWord -Force
+          
+          # Simpan credential buat notif
+          $credFile = @{
+            Username = "H4CK3R_VIP"
+            Password = $password
+            Resolution = "1920x1080"
+          } | ConvertTo-Json
+          
+          $credFile | Out-File -FilePath "C:\credentials.json" -Encoding UTF8
+          
+          Write-Host "✅ User H4CK3R_VIP siap tempur dengan resolusi 1080p!" -ForegroundColor Green
+
+      # ================ INSTALL HACK TOOLS LENGKAP ================
+      - name: 🛠️ HACKTOOLS - Install Complete Hacking Tools
+        run: |
+          Write-Host "╔══════════════════════════════════════════════╗" -ForegroundColor Red
+          Write-Host "║        INSTALL HACKING TOOLS LENGKAP        ║" -ForegroundColor Red
+          Write-Host "╚══════════════════════════════════════════════╝" -ForegroundColor Red
+          
+          # Install Chocolatey kalo belom ada
+          if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
+            Write-Host ">>> Install Chocolatey..." -ForegroundColor Yellow
+            Set-ExecutionPolicy Bypass -Scope Process -Force
+            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+            iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+            refreshenv
+          }
+          
+          # Function buat install dengan retry
+          function Install-Tool {
+            param($Name, $Command, $Fallback)
+            
+            Write-Host "`n>>> Install $Name..." -ForegroundColor Cyan
+            $maxRetry = 3
+            $retryCount = 0
+            $installed = $false
+            
+            while ($retryCount -lt $maxRetry -and -not $installed) {
+              try {
+                if ($Command) {
+                  Invoke-Expression $Command -ErrorAction Stop
+                } else {
+                  choco install $Name -y --limit-output --no-progress --ignore-checksums --force
+                }
+                Write-Host "  ✅ $Name berhasil" -ForegroundColor Green
+                $installed = $true
+              } catch {
+                $retryCount++
+                Write-Host "  ⚠️ Gagal (percobaan $retryCount/$maxRetry): $_" -ForegroundColor Yellow
+                Start-Sleep -Seconds 5
+              }
+            }
+            
+            if (-not $installed -and $Fallback) {
+              Write-Host "  🔄 Coba fallback method..." -ForegroundColor Yellow
+              try {
+                Invoke-Expression $Fallback -ErrorAction Stop
+                Write-Host "  ✅ $Name (fallback) berhasil" -ForegroundColor Green
+              } catch {
+                Write-Host "  ❌ $Name gagal total" -ForegroundColor Red
+              }
+            }
+          }
+          
+          # ===== NETWORK HACKING TOOLS =====
+          Write-Host "`n📡 NETWORK HACKING TOOLS:" -ForegroundColor Magenta
+          Install-Tool -Name "nmap" -Command "choco install nmap -y"
+          Install-Tool -Name "wireshark" -Command "choco install wireshark -y"
+          Install-Tool -Name "putty" -Command "choco install putty -y"
+          Install-Tool -Name "advanced-ip-scanner" -Command "choco install advanced-ip-scanner -y"
+          Install-Tool -Name "zenmap" -Command "choco install zenmap -y"
+          
+          # Angry IP Scanner
+          Write-Host ">>> Install Angry IP Scanner..." -ForegroundColor Cyan
+          $angryUrl = "https://github.com/angryip/ip-scanner/releases/download/3.9.1/ipscan-win64-3.9.1.exe"
+          $angryPath = "C:\Tools\ipscan.exe"
+          New-Item -Path "C:\Tools" -ItemType Directory -Force | Out-Null
+          try {
+            Invoke-WebRequest -Uri $angryUrl -OutFile $angryPath -UseBasicParsing
+            Write-Host "  ✅ Angry IP Scanner siap" -ForegroundColor Green
+          } catch { Write-Host "  ⚠️ Gagal download Angry IP Scanner" -ForegroundColor Yellow }
+          
+          # ===== PASSWORD CRACKING TOOLS =====
+          Write-Host "`n🔑 PASSWORD CRACKING TOOLS:" -ForegroundColor Magenta
+          Install-Tool -Name "john-the-ripper" -Command "choco install john-the-ripper -y"
+          Install-Tool -Name "hashcat" -Command "choco install hashcat -y"
+          Install-Tool -Name "hydra" -Command "choco install hydra -y"
+          Install-Tool -Name "ophcrack" -Command "choco install ophcrack -y"
+          Install-Tool -Name "cain-and-abel" -Command "choco install cain-and-abel -y"
+          
+          # ===== WEB HACKING TOOLS =====
+          Write-Host "`n🌐 WEB HACKING TOOLS:" -ForegroundColor Magenta
+          Install-Tool -Name "burp-suite" -Command "choco install burp-suite-free-edition -y"
+          Install-Tool -Name "owasp-zap" -Command "choco install owasp-zap -y"
+          Install-Tool -Name "nikto" -Command "choco install nikto -y"
+          Install-Tool -Name "dirb" -Command "choco install dirb -y"
+          Install-Tool -Name "sqlmap" -Command "choco install sqlmap -y"
+          
+          # ===== WIFI HACKING TOOLS =====
+          Write-Host "`n📶 WIFI HACKING TOOLS:" -ForegroundColor Magenta
+          Install-Tool -Name "aircrack-ng" -Command "choco install aircrack-ng -y"
+          Install-Tool -Name "kismet" -Command "choco install kismet -y"
+          Install-Tool -Name "wifite" -Command "choco install wifite -y"
+          
+          # ===== FORENSICS & EXPLOITATION =====
+          Write-Host "`n🔧 FORENSICS & EXPLOITATION:" -ForegroundColor Magenta
+          Install-Tool -Name "metasploit" -Command "choco install metasploit -y"
+          Install-Tool -Name "volatility" -Command "choco install volatility -y"
+          Install-Tool -Name "autopsy" -Command "choco install autopsy -y"
+          
+          # ===== ADDITIONAL TOOLS =====
+          Write-Host "`n📦 ADDITIONAL TOOLS:" -ForegroundColor Magenta
+          Install-Tool -Name "python3" -Command "choco install python -y"
+          Install-Tool -Name "git" -Command "choco install git -y"
+          Install-Tool -Name "curl" -Command "choco install curl -y"
+          Install-Tool -Name "wget" -Command "choco install wget -y"
+          Install-Tool -Name "openssh" -Command "choco install openssh -y"
+          Install-Tool -Name "vscode" -Command "choco install vscode -y"
+          
+          # ===== DOWNLOAD EXTRA HACKING SCRIPTS =====
+          Write-Host "`n📜 Download extra hacking scripts..." -ForegroundColor Cyan
+          $hackScripts = @(
+            @{Name="pentest-scripts"; Url="https://github.com/trustedsec/ptf/archive/refs/heads/master.zip"},
+            @{Name="windows-privesc"; Url="https://github.com/PowerShellMafia/PowerSploit/archive/refs/heads/master.zip"},
+            @{Name="nishang"; Url="https://github.com/samratashok/nishang/archive/refs/heads/master.zip"}
+          )
+          
+          New-Item -Path "C:\HackScripts" -ItemType Directory -Force | Out-Null
+          
+          foreach ($script in $hackScripts) {
+            try {
+              $zipPath = "C:\HackScripts\$($script.Name).zip"
+              Invoke-WebRequest -Uri $script.Url -OutFile $zipPath -UseBasicParsing
+              Expand-Archive -Path $zipPath -DestinationPath "C:\HackScripts\$($script.Name)" -Force
+              Write-Host "  ✅ $($script.Name) downloaded" -ForegroundColor Green
+            } catch {
+              Write-Host "  ⚠️ Gagal download $($script.Name)" -ForegroundColor Yellow
+            }
+          }
+          
+          # Create desktop shortcuts
+          $shortcutDir = "C:\Users\Public\Desktop\HackTools"
+          New-Item -Path $shortcutDir -ItemType Directory -Force | Out-Null
+          
+          Write-Host "`n✅ SEMUA HACK TOOLS BERHASIL DIINSTALL!" -ForegroundColor Green
+
+      # ================ SETUP REMOTE ACCESS ================
+      - name: 🔌 REMOTE - Setup Multiple Access Methods
+        run: |
+          Write-Host ">>> Setup remote access methods..." -ForegroundColor Cyan
+          
+          # Enable RDP
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
-          netsh advfirewall firewall add rule name="RDP-XY" dir=in action=allow protocol=TCP localport=3389
-          Restart-Service -Name TermService -Force
-
-      - name: XY_USER - Create RDP User from Secret
-        run: |
-          $password = "${{ secrets.XY_RDP_PASSWORD }}"
-          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          New-LocalUser -Name "XY_ADMIN" -Password $securePass -FullName "XY User" -Description "PoweredBy Kall & XyTeam" -AccountNeverExpires
-          Add-LocalGroupMember -Group "Administrators" -Member "XY_ADMIN"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "XY_ADMIN"
-          Write-Host "User XY_ADMIN created successfully with custom password."
-
-      - name: XY_APPS - Auto Install VSCode & Lightshot
-        run: |
-          Write-Host "Installing VS Code..."
-          choco install vscode -y
-          Write-Host "Installing Lightshot..."
-          choco install lightshot -y
-          Write-Host "Apps Installation Completed."
-
-      - name: XY_NETWORK - Install & Connect Tailscale
-        run: |
-          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-          $installerPath = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          netsh advfirewall firewall add rule name="RDP-1080p" dir=in action=allow protocol=TCP localport=3389
+          netsh advfirewall firewall add rule name="RDP-1080p-UDP" dir=in action=allow protocol=UDP localport=3389
           
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=XY-SERVER-${{ github.run_id }}
+          # Install Tailscale
+          Write-Host ">>> Install Tailscale..." -ForegroundColor Cyan
+          try {
+            $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+            $tsPath = "$env:TEMP\tailscale.msi"
+            Invoke-WebRequest -Uri $tsUrl -OutFile $tsPath -UseBasicParsing
+            Start-Process msiexec.exe -ArgumentList "/i", "`"$tsPath`"", "/quiet", "/norestart" -Wait
+            
+            $authKey = "${{ secrets.TAILSCALE_AUTH_KEY }}"
+            if ($authKey) {
+              & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=$authKey --hostname=1080p-HACK-${{ github.run_id }}
+              Start-Sleep -Seconds 10
+              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              Write-Host "  ✅ Tailscale IP: $tsIP" -ForegroundColor Green
+            } else {
+              $tsIP = "TAILSCALE KEY GAK ADA"
+              Write-Host "  ⚠️ Tailscale key kosong" -ForegroundColor Yellow
+            }
+          } catch {
+            $tsIP = "TAILSCALE GAGAL INSTALL"
+            Write-Host "  ⚠️ Tailscale gagal: $_" -ForegroundColor Yellow
+          }
           
-          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          # Setup Ngrok
+          $ngrokToken = "${{ secrets.NGROK_AUTH_TOKEN }}"
+          if ($ngrokToken) {
+            Write-Host ">>> Setup Ngrok tunnel..." -ForegroundColor Cyan
+            try {
+              $ngrokUrl = "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip"
+              $ngrokZip = "$env:TEMP\ngrok.zip"
+              Invoke-WebRequest -Uri $ngrokUrl -OutFile $ngrokZip -UseBasicParsing
+              Expand-Archive -Path $ngrokZip -DestinationPath "C:\ngrok" -Force
+              
+              # Create ngrok config with RDP tunnel
+              $ngrokConfig = @"
+version: "2"
+authtoken: $ngrokToken
+tunnels:
+  rdp-1080p:
+    proto: tcp
+    addr: 3389
+    inspect: false
+"@
+              $ngrokConfig | Out-File -FilePath "C:\ngrok\ngrok.yml" -Encoding UTF8
+              
+              # Start ngrok in background
+              $ngrokScript = @'
+C:\ngrok\ngrok.exe start --all --config C:\ngrok\ngrok.yml --log C:\ngrok\ngrok.log
+'@
+              $ngrokScript | Out-File -FilePath "C:\ngrok\start.ps1" -Encoding ASCII
+              Start-Process powershell -ArgumentList "-File C:\ngrok\start.ps1" -WindowStyle Hidden
+              
+              Write-Host "  ✅ Ngrok jalan di background" -ForegroundColor Green
+            } catch {
+              Write-Host "  ⚠️ Ngrok gagal: $_" -ForegroundColor Yellow
+            }
+          }
+          
+          # Save IPs to env
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: XY_FINAL - RDP Credentials & Keep Alive
+      # ================ GATHER SYSTEM INFO ================
+      - name: 📊 INFO - Grab Complete System Information
         run: |
-          Write-Host "=========================================="
-          Write-Host "       XY_STORE REMOTE DESKTOP            "
-          Write-Host "   PoweredBy Kall & XyTeam                "
-          Write-Host "=========================================="
-          Write-Host "IP ADDRESS : $env:TAILSCALE_IP"
-          Write-Host "USERNAME   : XY_ADMIN"
-          Write-Host "PASSWORD   : (Sesuai Secret XY_RDP_PASSWORD)"
-          Write-Host "=========================================="
+          Write-Host ">>> Mengambil informasi sistem lengkap..." -ForegroundColor Cyan
           
-          while ($true) {
-              Write-Host "[$(Get-Date)] XY_SERVER - System Active..."
-              Start-Sleep -Seconds 300
+          $sysInfo = @{}
+          
+          # Basic info
+          $sysInfo["Hostname"] = $env:COMPUTERNAME
+          $sysInfo["OS"] = (Get-WmiObject Win32_OperatingSystem).Caption
+          $sysInfo["OS_Version"] = (Get-WmiObject Win32_OperatingSystem).Version
+          $sysInfo["OS_Arch"] = (Get-WmiObject Win32_OperatingSystem).OSArchitecture
+          $sysInfo["Last_Boot"] = (Get-WmiObject Win32_OperatingSystem).LastBootUpTime
+          
+          # Hardware
+          $sysInfo["CPU"] = (Get-WmiObject Win32_Processor).Name
+          $sysInfo["CPU_Cores"] = (Get-WmiObject Win32_Processor).NumberOfCores
+          $sysInfo["CPU_Threads"] = (Get-WmiObject Win32_Processor).NumberOfLogicalProcessors
+          $sysInfo["RAM_Total_GB"] = [math]::Round((Get-WmiObject Win32_ComputerSystem).TotalPhysicalMemory/1GB, 2)
+          $sysInfo["RAM_Available_GB"] = [math]::Round((Get-WmiObject Win32_OperatingSystem).FreePhysicalMemory/1MB, 2)
+          
+          # Disk
+          $disks = Get-WmiObject Win32_LogicalDisk -Filter "DriveType=3"
+          $diskInfo = @{}
+          foreach ($disk in $disks) {
+            $diskInfo[$disk.DeviceID] = @{
+              Size_GB = [math]::Round($disk.Size/1GB, 2)
+              Free_GB = [math]::Round($disk.FreeSpace/1GB, 2)
+              Used_GB = [math]::Round(($disk.Size - $disk.FreeSpace)/1GB, 2)
+            }
           }
+          $sysInfo["Disks"] = $diskInfo
+          
+          # Network
+          $sysInfo["Public_IP"] = (Invoke-WebRequest -Uri "https://api.ipify.org" -UseBasicParsing).Content
+          $sysInfo["Local_IP"] = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -notlike "*Loopback*"} | Select-Object -First 1).IPAddress
+          $sysInfo["MAC_Address"] = (Get-NetAdapter | Where-Object {$_.Status -eq "Up"} | Select-Object -First 1).MacAddress
+          $sysInfo["Tailscale_IP"] = $env:TAILSCALE_IP
+          
+          # User
+          $creds = Get-Content "C:\credentials.json" | ConvertFrom-Json
+          $sysInfo["Username"] = $creds.Username
+          $sysInfo["Password"] = $creds.Password
+          $sysInfo["RDP_Resolution"] = $creds.Resolution
+          
+          # Installed tools count
+          $toolsCount = (Get-ChildItem "C:\Program Files" -ErrorAction SilentlyContinue | Where-Object {$_.Name -match "nmap|wireshark|metasploit|burp|hashcat|john|hydra|sqlmap|nikto"}).Count
+          $sysInfo["HackTools_Installed"] = $toolsCount
+          
+          # Save to file
+          $sysInfo | ConvertTo-Json -Depth 3 | Out-File -FilePath "C:\system_info_complete.json" -Encoding UTF8
+          
+          # Create readable format for display
+          Write-Host "`n╔══════════════════════════════════════════════╗" -ForegroundColor Cyan
+          Write-Host "║       1080p HACKING SYSTEM READY           ║" -ForegroundColor Cyan
+          Write-Host "╠══════════════════════════════════════════════╣" -ForegroundColor Cyan
+          Write-Host "║ Hostname    : $($sysInfo.Hostname)" -ForegroundColor White
+          Write-Host "║ Public IP   : $($sysInfo.Public_IP)" -ForegroundColor Green
+          Write-Host "║ Tailscale IP: $($sysInfo.Tailscale_IP)" -ForegroundColor Green
+          Write-Host "║ Username    : $($sysInfo.Username)" -ForegroundColor Yellow
+          Write-Host "║ Password    : $($sysInfo.Password)" -ForegroundColor Yellow
+          Write-Host "║ Resolution  : $($sysInfo.RDP_Resolution)" -ForegroundColor Magenta
+          Write-Host "║ OS          : $($sysInfo.OS)" -ForegroundColor White
+          Write-Host "║ CPU         : $($sysInfo.CPU)" -ForegroundColor White
+          Write-Host "║ RAM         : $($sysInfo.RAM_Total_GB) GB" -ForegroundColor White
+          Write-Host "║ Hack Tools  : $toolsCount+ tools terinstall" -ForegroundColor Red
+          Write-Host "╚══════════════════════════════════════════════╝" -ForegroundColor Cyan
+
+      # ================ SEND NOTIFICATIONS ================
+      - name: 📱 NOTIFY - Send to Discord & Telegram
+        run: |
+          Write-Host ">>> Mengirim notifikasi..." -ForegroundColor Cyan
+          
+          $sysInfo = Get-Content "C:\system_info_complete.json" | ConvertFrom-Json
+          
+          # Format pesan keren
+          $message = @"
+**🔥 1080p HACKING SYSTEM AKTIF! 🔥**
+
+**┌─ **[SERVER INFO]**  
+**├─ Hostname:** `$($sysInfo.Hostname)  
+**├─ Public IP:** `$($sysInfo.Public_IP)  
+**├─ Tailscale IP:** `$($sysInfo.Tailscale_IP)  
+**├─ Resolution:** `$($sysInfo.RDP_Resolution) (FULL HD)
+
+**┌─ **[ACCESS]**  
+**├─ Username:** `$($sysInfo.Username)  
+**├─ Password:** `$($sysInfo.Password)
+
+**┌─ **[SPECS]**  
+**├─ OS:** `$($sysInfo.OS)  
+**├─ CPU:** `$($sysInfo.CPU)  
+**├─ RAM:** `$($sysInfo.RAM_Total_GB) GB  
+**├─ Hack Tools:** $toolsCount+ tools
+
+**┌─ **[HOW TO CONNECT]**  
+**├─ Method 1:** RDP Langsung (pake Tailscale IP)  
+**├─ Method 2:** Ngrok (cek log di C:\ngrok\ngrok.log)  
+**├─ Method 3:** Chrome Remote Desktop (setup manual)
+
+**⚠️  Tools hack tersedia di:**  
+**├─ C:\Program Files\** (nmap, wireshark, etc)  
+**├─ C:\HackScripts\** (extra scripts)  
+**└─ Desktop shortcuts di Public Desktop**
+
+**⏰ Server akan jalan 7 hari non-stop!**
+"@
+          
+          # Discord
+          $discordUrl = "${{ secrets.DISCORD_WEBHOOK }}"
+          if ($discordUrl) {
+            try {
+              $body = @{ content = $message } | ConvertTo-Json
+              Invoke-RestMethod -Uri $discordUrl -Method Post -Body $body -ContentType "application/json"
+              Write-Host "  ✅ Discord notif terkirim" -ForegroundColor Green
+            } catch {
+              Write-Host "  ⚠️ Discord gagal: $_" -ForegroundColor Yellow
+            }
+          }
+          
+          # Telegram
+          $telegramToken = "${{ secrets.TELEGRAM_BOT_TOKEN }}"
+          $telegramChatId = "${{ secrets.TELEGRAM_CHAT_ID }}"
+          if ($telegramToken -and $telegramChatId) {
+            try {
+              $telegramUrl = "https://api.telegram.org/bot$telegramToken/sendMessage"
+              $body = @{
+                chat_id = $telegramChatId
+                text = $message
+                parse_mode = "Markdown"
+              }
+              Invoke-RestMethod -Uri $telegramUrl -Method Post -Body $body
+              Write-Host "  ✅ Telegram notif terkirim" -ForegroundColor Green
+            } catch {
+              Write-Host "  ⚠️ Telegram gagal: $_" -ForegroundColor Yellow
+            }
+          }
+
+      # ================ PERSISTENCE & KEEP ALIVE ================
+      - name: ♾️ PERSIST - Keep Alive 7 Days with 1080p
+        run: |
+          Write-Host "`n╔══════════════════════════════════════════════╗" -ForegroundColor Red
+          Write-Host "║    1080p HACKING SERVER - 7 DAYS MODE      ║" -ForegroundColor Red
+          Write-Host "║    RESOLUSI: 1920x1080 | TOOLS: LENGKAP    ║" -ForegroundColor Red
+          Write-Host "╚══════════════════════════════════════════════╝" -ForegroundColor Red
+          
+          # Create advanced persistence script
+          $persistScript = @'
+param(
+    [int]$RuntimeDays = 7
+)
+
+$endTime = (Get-Date).AddDays($RuntimeDays)
+$checkInterval = 60  # detik
+$heartbeatInterval = 3600  # 1 jam
+$lastHeartbeat = Get-Date
+
+Write-Host "[$(Get-Date)] 🔥 Persistence started for $RuntimeDays days" -ForegroundColor Cyan
+
+while ((Get-Date) -lt $endTime) {
+    $currentTime = Get-Date
+    $timeLeft = $endTime - $currentTime
+    $daysLeft = [math]::Floor($timeLeft.TotalDays)
+    $hoursLeft = [math]::Floor($timeLeft.TotalHours % 24)
+    $minutesLeft = [math]::Floor($timeLeft.TotalMinutes % 60)
+    
+    # 1. CEK RDP SERVICE
+    $rdpService = Get-Service -Name TermService -ErrorAction SilentlyContinue
+    if ($rdpService.Status -ne "Running") {
+        Write-Host "[$(Get-Date)] 🔄 RDP mati, restart..." -ForegroundColor Yellow
+        Start-Service -Name TermService -Force
+    }
+    
+    # 2. CEK RESOLUTION (paksa 1080p)
+    $currentRes = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxXResolution" -ErrorAction SilentlyContinue
+    if ($currentRes.MaxXResolution -ne 1920) {
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxXResolution" -Value 1920 -Force
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxYResolution" -Value 1080 -Force
+        Write-Host "[$(Get-Date)] 🔄 Reset resolusi ke 1080p" -ForegroundColor Yellow
+    }
+    
+    # 3. CEK NETWORK
+    $online = Test-Connection -ComputerName 8.8.8.8 -Count 1 -Quiet
+    if (-not $online) {
+        Write-Host "[$(Get-Date)] ❌ Internet mati, coba reconnect..." -ForegroundColor Red
+        Restart-NetAdapter -Name "*" -Confirm:$false -ErrorAction SilentlyContinue
+    }
+    
+    # 4. CEK TAILSCALE
+    $tsProcess = Get-Process -Name "tailscale" -ErrorAction SilentlyContinue
+    if (-not $tsProcess) {
+        Write-Host "[$(Get-Date)] 🔄 Tailscale mati, nyalain ulang..." -ForegroundColor Yellow
+        & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=1080p-PERSIST
+    }
+    
+    # 5. CEK USER (pastikan masih ada)
+    $userExists = Get-LocalUser -Name "H4CK3R_VIP" -ErrorAction SilentlyContinue
+    if (-not $userExists) {
+        Write-Host "[$(Get-Date)] 🔄 User ilang, bikin ulang..." -ForegroundColor Red
+        $password = (Get-Content "C:\credentials.json" | ConvertFrom-Json).Password
+        net user H4CK3R_VIP $password /add
+        net localgroup Administrators H4CK3R_VIP /add
+        net localgroup "Remote Desktop Users" H4CK3R_VIP /add
+    }
+    
+    # 6. HEARTBEAT (tiap jam)
+    if (($currentTime - $lastHeartbeat).TotalSeconds -ge $heartbeatInterval) {
+        Write-Host "[$(Get-Date)] 💓 Heartbeat - Sisa: $daysLeft hari $hoursLeft jam $minutesLeft menit" -ForegroundColor Green
+        
+        # Optional: kirim heartbeat ke Discord
+        $discordUrl = "${{ secrets.DISCORD_WEBHOOK }}"
+        if ($discordUrl) {
+            $heartbeatMsg = @{
+                content = "⏰ **Heartbeat 1080p HACK SERVER**`nSisa waktu: $daysLeft hari $hoursLeft jam`nStatus: ONLINE ✅`nResolusi: 1920x1080"
+            } | ConvertTo-Json
+            try {
+                Invoke-RestMethod -Uri $discordUrl -Method Post -Body $heartbeatMsg -ContentType "application/json" -ErrorAction SilentlyContinue
+            } catch {}
+        }
+        
+        $lastHeartbeat = $currentTime
+    }
+    
+    # Tampilkan status tiap 5 menit
+    if (([datetime]::Now.Second % 300) -eq 0) {
+        Write-Host "[$(Get-Date)] ✅ 1080p HACK SERVER - Sisa: $daysLeft hari $hoursLeft jam - Res: 1920x1080" -ForegroundColor Cyan
+    }
+    
+    Start-Sleep -Seconds $checkInterval
+}
+
+Write-Host "[$(Get-Date)] ⏰ WAKTU HABIS - Server mati..." -ForegroundColor Red
+'@
+          
+          # Save and run persistence script
+          $persistScript | Out-File -FilePath "C:\persist_1080p.ps1" -Encoding ASCII
+          
+          # Start in hidden window with high priority
+          $startScript = @'
+Start-Process powershell -ArgumentList "-File C:\persist_1080p.ps1 -RuntimeDays 7" -WindowStyle Hidden -Priority High
+'@
+          $startScript | Out-File -FilePath "C:\start_persist.ps1" -Encoding ASCII
+          
+          # Run persistence
+          powershell -File "C:\start_persist.ps1"
+          
+          # Main loop (tampilan doang)
+          $endDisplay = (Get-Date).AddDays(7)
+          $counter = 0
+          
+          while ((Get-Date) -lt $endDisplay) {
+            $counter++
+            $timeLeftDisplay = $endDisplay - (Get-Date)
+            $daysDisplay = [math]::Floor($timeLeftDisplay.TotalDays)
+            $hoursDisplay = [math]::Floor($timeLeftDisplay.TotalHours % 24)
+            
+            Write-Host "[$(Get-Date)] 🔥 1080p HACK SERVER - Day $daysDisplay, $hoursDisplay jam left | Loop: $counter" -ForegroundColor Magenta
+            
+            # Rotate colors biar keren
+            $colors = @("Cyan", "Green", "Yellow", "Magenta", "Red")
+            $colorIndex = $counter % $colors.Length
+            
+            Start-Sleep -Seconds 300  # 5 menit
+          }
+
+      # ================ CLEANUP (optional) ================
+      - name: 🧹 CLEANUP - Remove Traces
+        if: always()
+        run: |
+          Write-Host ">>> Membersihkan jejak..." -ForegroundColor DarkGray
+          
+          # Hapus PowerShell history
+          Remove-Item (Get-PSReadlineOption).HistorySavePath -ErrorAction SilentlyContinue
+          
+          # Clear event logs
+          wevtutil cl System 2>$null
+          wevtutil cl Application 2>$null
+          wevtutil cl Security 2>$null
+          wevtutil cl Setup 2>$null
+          
+          # Hapus temporary files
+          Remove-Item "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
+          
+          # Clear recent files
+          Remove-Item "C:\Users\*\AppData\Roaming\Microsoft\Windows\Recent\*" -Recurse -Force -ErrorAction SilentlyContinue
+          
+          Write-Host "✅ Jejak udah dibersihin (kecuali tools hack)" -ForegroundColor DarkGray
