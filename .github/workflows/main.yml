@@ -18,10 +18,9 @@ jobs:
         shell: powershell
         run: |
           if ([string]::IsNullOrEmpty("${{ secrets.TAILSCALE_AUTH_KEY }}")) {
-            Write-Host "❌ ERROR: TAILSCALE_AUTH_KEY belum diisi di Secrets!" -ForegroundColor Red
+            Write-Host "❌ TAILSCALE_AUTH_KEY Kosong!" -ForegroundColor Red
             exit 1
           }
-          Write-Host "✅ Secrets OK" -ForegroundColor Green
 
       - name: 👤 SETUP USER XY (1080p)
         shell: powershell
@@ -29,21 +28,18 @@ jobs:
           $password = "${{ secrets.XY_RDP_PASSWORD }}"
           if ([string]::IsNullOrEmpty($password)) { $password = "XYAdmin1080p!" }
           
-          # Buat User baru dengan brand XY
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
           New-LocalUser -Name "h4ck3r" -Password $securePass -FullName "XY Hacker" -Description "PoweredBy Kall & XyTeam"
           Add-LocalGroupMember -Group "Administrators" -Member "h4ck3r"
           
-          # Aktifkan Remote Desktop
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           
-          # Paksa Resolusi 1080p di Registry
           $rdpPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"
           Set-ItemProperty -Path $rdpPath -Name "MaxXResolution" -Value 1920
           Set-ItemProperty -Path $rdpPath -Name "MaxYResolution" -Value 1080
           
-          Write-Host "✅ User h4ck3r & RDP 1080p Ready" -ForegroundColor Green
+          Write-Host "✅ User & RDP Ready" -ForegroundColor Green
 
       - name: 🔌 TAILSCALE SETUP
         shell: powershell
@@ -57,42 +53,25 @@ jobs:
           & $tsExe up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="XY-RDP-1080P"
           
           $ip = & $tsExe ip -4
-          echo "TS_IP=$ip" >> $env:GITHUB_ENV
-          Write-Host "✅ Tailscale IP: $ip" -ForegroundColor Green
+          Write-Host "🚀 TAILSCALE IP: $ip" -ForegroundColor Cyan
 
       - name: 🛠️ INSTALL LIGHTSHOT
         shell: powershell
         run: |
           Set-ExecutionPolicy Bypass -Scope Process -Force
           [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
-          
-          # Install Chocolatey jika belum ada
           if (!(Get-Command choco -ErrorAction SilentlyContinue)) {
             iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
           }
-          
-          # Hanya install Lightshot (Chrome sudah ada di runner)
           choco install lightshot -y --no-progress
-          Write-Host "✅ Lightshot Berhasil Terpasang" -ForegroundColor Green
-
-      - name: 📱 SEND NOTIF XY
-        shell: powershell
-        run: |
-          $publicIp = (Invoke-WebRequest -Uri "https://api.ipify.org" -UseBasicParsing).Content
-          $msg = "✨ **XY_RDP ONLINE (1080p)** ✨`n`n📍 IP: $publicIp`n🔌 Tailscale: ${{ env.TS_IP }}`n👤 User: h4ck3r`n🛠️ Tools: Chrome & Lightshot Ready`n`nPoweredBy Kall & XyTeam"
-          
-          if ("${{ secrets.DISCORD_WEBHOOK }}") {
-            $body = @{ content = $msg } | ConvertTo-Json
-            Invoke-RestMethod -Uri "${{ secrets.DISCORD_WEBHOOK }}" -Method Post -Body $body -ContentType "application/json"
-          }
+          Write-Host "✅ Lightshot Ready" -ForegroundColor Green
 
       - name: ♾️ KEEP ALIVE XY
         shell: powershell
         run: |
           $start = Get-Date
-          # Berjalan maksimal 350 menit (kurang sedikit dari 6 jam limit GitHub)
           while ((Get-Date) -lt $start.AddMinutes(350)) {
-            $remaining = [math]::Round((350 - ((Get-Date) - $start).TotalMinutes))
-            Write-Host "🌸 [$(Get-Date)] XY-RDP Aktif - Sisa: $remaining Menit" -ForegroundColor Cyan
+            $publicIp = (Invoke-WebRequest -Uri "https://api.ipify.org" -UseBasicParsing).Content
+            Write-Host "🕒 [$(Get-Date)] XY-RDP ONLINE | IP: $publicIp" -ForegroundColor Green
             Start-Sleep -Seconds 120
           }
