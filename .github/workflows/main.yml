@@ -3,122 +3,87 @@ name: XY_RDP_1080P_FINAL
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */8 * * *'
+    - cron: '0 */4 * * *'
 
 jobs:
   XY_PROJECT:
     runs-on: windows-latest
-    timeout-minutes: 10080
+    timeout-minutes: 360 
 
     steps:
-      # STEP 1: Download script dari repo ini
-      - name: 📥 DOWNLOAD - Get PowerShell Scripts
-        run: |
-          # Ini cuma placeholder, script aslinya bakal ditulis langsung di bawah
-          Write-Host "Mempersiapkan environment..." -ForegroundColor Cyan
+      - name: 📥 CHECKOUT XY_PROJECT
+        uses: actions/checkout@v4
 
       - name: ✅ VALIDASI SECRETS
+        shell: powershell
         run: |
-          $errors = @()
           if ([string]::IsNullOrEmpty("${{ secrets.TAILSCALE_AUTH_KEY }}")) {
-            $errors += "TAILSCALE_AUTH_KEY wajib diisi"
-          }
-          
-          if ($errors.Count -gt 0) {
-            Write-Host "❌ ERROR: $($errors -join ', ')" -ForegroundColor Red
+            Write-Host "❌ ERROR: TAILSCALE_AUTH_KEY belum diisi di Secrets!" -ForegroundColor Red
             exit 1
           }
-          Write-Host "✅ Semua secret OK" -ForegroundColor Green
 
-      - name: ⚡ SET 1080p RESOLUTION
-        run: |
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxXResolution" -Value 1920 -Force
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxYResolution" -Value 1080 -Force
-          Write-Host "✅ Resolusi 1080p dipaksa" -ForegroundColor Green
-
-      - name: 👤 CREATE USER
+      - name: 👤 SETUP USER XY (1080p)
+        shell: powershell
         run: |
           $password = "${{ secrets.XY_RDP_PASSWORD }}"
-          if ([string]::IsNullOrEmpty($password)) { $password = "Admin1080p@123" }
+          if ([string]::IsNullOrEmpty($password)) { $password = "XYAdmin1080p!" }
           
-          # Hapus user lama
-          $existing = Get-LocalUser -Name "h4ck3r" -ErrorAction SilentlyContinue
-          if ($existing) { Remove-LocalUser -Name "h4ck3r" -Force }
-          
-          # Buat user baru
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          New-LocalUser -Name "h4ck3r" -Password $securePass -FullName "Hacker 1080p" -AccountNeverExpires
+          New-LocalUser -Name "h4ck3r" -Password $securePass -FullName "XY Hacker" -Description "PoweredBy Kall & XyTeam"
           Add-LocalGroupMember -Group "Administrators" -Member "h4ck3r"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "h4ck3r"
           
-          # Simpan credential
-          @{user="h4ck3r"; pass=$password} | ConvertTo-Json | Out-File "C:\cred.txt"
-          Write-Host "✅ User h4ck3r dibuat" -ForegroundColor Green
-
-      - name: 🛠️ INSTALL HACK TOOLS
-        run: |
-          # Install Chocolatey
-          Set-ExecutionPolicy Bypass -Scope Process -Force
-          [System.Net.ServicePointManager]::SecurityProtocol = 3072
-          Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+          # Enable Remote Desktop
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           
-          # Install tools satu per satu (biar gak error sekaligus)
-          $tools = @("nmap", "wireshark", "putty", "john-the-ripper", "hashcat")
-          foreach ($tool in $tools) {
-            try { choco install $tool -y --limit-output --no-progress } catch { Write-Host "⚠️ $tool gagal" }
-          }
-          Write-Host "✅ Tools terinstall" -ForegroundColor Green
+          # Registry Force 1080p
+          $rdpPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"
+          Set-ItemProperty -Path $rdpPath -Name "MaxXResolution" -Value 1920
+          Set-ItemProperty -Path $rdpPath -Name "MaxYResolution" -Value 1080
+          
+          Write-Host "✅ User h4ck3r & RDP 1080p Ready" -ForegroundColor Green
 
       - name: 🔌 TAILSCALE SETUP
+        shell: powershell
         run: |
-          # Download & install Tailscale
-          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
           $out = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest -Uri $url -OutFile $out
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$out`"", "/quiet", "/norestart" -Wait
+          Start-Process msiexec.exe -ArgumentList "/i", "$out", "/quiet", "/norestart" -Wait
           
-          # Connect
-          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="hack-1080p"
-          Start-Sleep -Seconds 5
-          $ip = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
-          echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
-          Write-Host "✅ Tailscale IP: $ip" -ForegroundColor Green
+          $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
+          & $tsExe up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="XY-RDP-1080P"
+          
+          $ip = & $tsExe ip -4
+          echo "TS_IP=$ip" >> $env:GITHUB_ENV
 
-      - name: 📊 INFO
+      - name: 🛠️ INSTALL CHROME & LIGHTSHOT
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+          iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+          
+          # Install Chrome & Lightshot saja
+          choco install googlechrome lightshot -y --no-progress
+          Write-Host "✅ Chrome & Lightshot Terpasang" -ForegroundColor Green
+
+      - name: 📱 SEND NOTIF XY
+        shell: powershell
         run: |
           $publicIp = (Invoke-WebRequest -Uri "https://api.ipify.org" -UseBasicParsing).Content
-          $cred = Get-Content "C:\cred.txt" | ConvertFrom-Json
+          $msg = "✨ **XY_RDP ONLINE (1080p)** ✨`n`n📍 IP: $publicIp`n🔌 Tailscale: ${{ env.TS_IP }}`n👤 User: h4ck3r`n🛠️ Tools: Chrome & Lightshot`n`nPoweredBy Kall & XyTeam"
           
-          Write-Host ""
-          Write-Host "╔════════════════════════════════════╗" -ForegroundColor Cyan
-          Write-Host "║      1080p HACKING SERVER         ║" -ForegroundColor Cyan
-          Write-Host "╠════════════════════════════════════╣" -ForegroundColor Cyan
-          Write-Host "║ Public IP  : $publicIp" -ForegroundColor White
-          Write-Host "║ Tailscale  : $env:TAILSCALE_IP" -ForegroundColor White
-          Write-Host "║ Username   : $($cred.user)" -ForegroundColor Yellow
-          Write-Host "║ Password   : $($cred.pass)" -ForegroundColor Yellow
-          Write-Host "║ Resolution : 1920x1080" -ForegroundColor Magenta
-          Write-Host "╚════════════════════════════════════╝" -ForegroundColor Cyan
-          
-          # Simpan buat notif
-          @{ip=$publicIp; ts=$env:TAILSCALE_IP; user=$cred.user; pass=$cred.pass} | ConvertTo-Json | Out-File "C:\info.json"
-
-      - name: 📱 SEND NOTIF
-        run: |
-          $info = Get-Content "C:\info.json" | ConvertFrom-Json
-          $msg = "🔥 1080p HACK SERVER AKTIF!`nIP: $($info.ip)`nTailscale: $($info.ts)`nUser: $($info.user)`nPass: $($info.pass)"
-          
-          $webhook = "${{ secrets.DISCORD_WEBHOOK }}"
-          if ($webhook) {
-            $body = @{content=$msg} | ConvertTo-Json
-            Invoke-RestMethod -Uri $webhook -Method Post -Body $body -ContentType "application/json"
+          if ("${{ secrets.DISCORD_WEBHOOK }}") {
+            $body = @{ content = $msg } | ConvertTo-Json
+            Invoke-RestMethod -Uri "${{ secrets.DISCORD_WEBHOOK }}" -Method Post -Body $body -ContentType "application/json"
           }
 
-      - name: ♾️ KEEP ALIVE 7 DAYS
+      - name: ♾️ KEEP ALIVE XY
+        shell: powershell
         run: |
-          $end = (Get-Date).AddDays(7)
-          while ((Get-Date) -lt $end) {
-            $remaining = $end - (Get-Date)
-            Write-Host "[$(Get-Date)] ✅ Server hidup - Sisa: $($remaining.Days) hari $($remaining.Hours) jam" -ForegroundColor Green
-            Start-Sleep -Seconds 300
+          $start = Get-Date
+          while ((Get-Date) -lt $start.AddMinutes(350)) {
+            Write-Host "🌸 [$(Get-Date)] XY-RDP Tetap Hidup..." -ForegroundColor Cyan
+            Start-Sleep -Seconds 120
           }
