@@ -1,9 +1,9 @@
-name: XY_RDP_1080P_FINAL
+name: XYRDP
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */4 * * *'
+    - cron: '0 */6 * * *'
 
 jobs:
   XY_PROJECT:
@@ -14,32 +14,34 @@ jobs:
       - name: 📥 CHECKOUT XY_PROJECT
         uses: actions/checkout@v4
 
-      - name: ✅ VALIDASI SECRETS
-        shell: powershell
-        run: |
-          if ([string]::IsNullOrEmpty("${{ secrets.TAILSCALE_AUTH_KEY }}")) {
-            Write-Host "❌ TAILSCALE_AUTH_KEY Kosong!" -ForegroundColor Red
-            exit 1
-          }
-
-      - name: 👤 SETUP USER XY (1080p)
+      - name: 👤 SETUP USER XY & RDP
         shell: powershell
         run: |
           $password = "${{ secrets.XY_RDP_PASSWORD }}"
           if ([string]::IsNullOrEmpty($password)) { $password = "XYAdmin1080p!" }
-          
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
           New-LocalUser -Name "h4ck3r" -Password $securePass -FullName "XY Hacker" -Description "PoweredBy Kall & XyTeam"
           Add-LocalGroupMember -Group "Administrators" -Member "h4ck3r"
-          
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Write-Host "✅ User h4ck3r Ready - XY Project" -ForegroundColor Green
+
+      - name: 📦 UPDATE & INSTALL TOOLS (VSCode, Spotify, Lightshot)
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          # Install Chocolatey if not exists
+          if (!(Get-Command choco -ErrorAction SilentlyContinue)) {
+            iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+          }
           
-          $rdpPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"
-          Set-ItemProperty -Path $rdpPath -Name "MaxXResolution" -Value 1920
-          Set-ItemProperty -Path $rdpPath -Name "MaxYResolution" -Value 1080
+          Write-Host "🔄 Updating existing tools..." -ForegroundColor Cyan
+          choco upgrade all -y --no-progress
           
-          Write-Host "✅ User & RDP Ready" -ForegroundColor Green
+          Write-Host "🚀 Installing VS Code, Spotify, and Lightshot..." -ForegroundColor Cyan
+          choco install vscode spotify lightshot -y --no-progress
+          
+          Write-Host "✅ All Tools Installed & Updated!" -ForegroundColor Green
 
       - name: 🔌 TAILSCALE SETUP
         shell: powershell
@@ -48,30 +50,17 @@ jobs:
           $out = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest -Uri $url -OutFile $out
           Start-Process msiexec.exe -ArgumentList "/i", "$out", "/quiet", "/norestart" -Wait
-          
           $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
-          & $tsExe up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="XY-RDP-1080P"
-          
+          & $tsExe up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="XY-RDP-POWERED"
           $ip = & $tsExe ip -4
           Write-Host "🚀 TAILSCALE IP: $ip" -ForegroundColor Cyan
 
-      - name: 🛠️ INSTALL LIGHTSHOT
-        shell: powershell
-        run: |
-          Set-ExecutionPolicy Bypass -Scope Process -Force
-          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
-          if (!(Get-Command choco -ErrorAction SilentlyContinue)) {
-            iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-          }
-          choco install lightshot -y --no-progress
-          Write-Host "✅ Lightshot Ready" -ForegroundColor Green
-
-      - name: ♾️ KEEP ALIVE XY
+      - name: ♾️ KEEP ALIVE XY (6 Hours Cycle)
         shell: powershell
         run: |
           $start = Get-Date
-          while ((Get-Date) -lt $start.AddMinutes(350)) {
+          while ((Get-Date) -lt $start.AddMinutes(345)) {
             $publicIp = (Invoke-WebRequest -Uri "https://api.ipify.org" -UseBasicParsing).Content
-            Write-Host "🕒 [$(Get-Date)] XY-RDP ONLINE | IP: $publicIp" -ForegroundColor Green
+            Write-Host "🕒 [$(Get-Date)] XY-RDP ONLINE | IP: $publicIp | Tools: Updated" -ForegroundColor Green
             Start-Sleep -Seconds 120
           }
